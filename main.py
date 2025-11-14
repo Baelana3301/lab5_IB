@@ -2,20 +2,23 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
 import random
-from sympy import isprime, randprime, mod_inverse
 import math
+import secrets
 
 
-class RSAApp:
+class ElGamalApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Асимметричная криптография - RSA (Вариант 4)")
+        self.root.title("Асимметричная криптография - Эль-Гамаль (Вариант 4)")
         self.root.geometry("900x700")
 
         # Переменные для ключей
         self.public_key = None
         self.private_key = None
-        self.n = None
+        self.p = None
+        self.g = None
+        self.x = None
+        self.y = None
 
         # Переменные состояния
         self.current_file = None
@@ -26,7 +29,7 @@ class RSAApp:
     def create_widgets(self):
         """Создание элементов интерфейса"""
         # Заголовок
-        title_label = tk.Label(self.root, text="Асимметричная криптография - Алгоритм RSA",
+        title_label = tk.Label(self.root, text="Асимметричная криптография - Алгоритм Эль-Гамаля",
                                font=("Arial", 14, "bold"))
         title_label.pack(pady=10)
 
@@ -58,8 +61,8 @@ class RSAApp:
         param_frame = tk.LabelFrame(parent, text="Параметры генерации", padx=10, pady=10)
         param_frame.pack(fill='x', padx=10, pady=5)
 
-        tk.Label(param_frame, text="Битовая длина простых чисел (минимум 32 бита):").grid(row=0, column=0, sticky='w',
-                                                                                          pady=2)
+        tk.Label(param_frame, text="Битовая длина простого числа (минимум 32 бита):").grid(row=0, column=0, sticky='w',
+                                                                                           pady=2)
         self.bit_length_var = tk.StringVar(value="32")
         bit_length_entry = tk.Entry(param_frame, textvariable=self.bit_length_var, width=10)
         bit_length_entry.grid(row=0, column=1, sticky='w', pady=2)
@@ -68,9 +71,9 @@ class RSAApp:
         button_frame = tk.Frame(parent)
         button_frame.pack(fill='x', padx=10, pady=10)
 
-        self.btn_generate_primes = tk.Button(button_frame, text="Сгенерировать простые числа",
-                                             command=self.generate_primes, padx=10, pady=5, bg="lightblue")
-        self.btn_generate_primes.pack(side=tk.LEFT, padx=5)
+        self.btn_generate_prime = tk.Button(button_frame, text="Сгенерировать простое число",
+                                            command=self.generate_prime, padx=10, pady=5, bg="lightblue")
+        self.btn_generate_prime.pack(side=tk.LEFT, padx=5)
 
         self.btn_generate_keys = tk.Button(button_frame, text="Сгенерировать ключи",
                                            command=self.generate_keys, padx=10, pady=5, bg="lightgreen")
@@ -80,25 +83,31 @@ class RSAApp:
         key_output_frame = tk.LabelFrame(parent, text="Сгенерированные ключи", padx=10, pady=10)
         key_output_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        # Простые числа
-        tk.Label(key_output_frame, text="Простые числа:").grid(row=0, column=0, sticky='w', pady=2)
-        self.primes_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=3)
-        self.primes_text.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=5)
+        # Простое число
+        tk.Label(key_output_frame, text="Простое число p:").grid(row=0, column=0, sticky='w', pady=2)
+        self.prime_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=2)
+        self.prime_text.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=5)
+
+        # Генератор
+        tk.Label(key_output_frame, text="Генератор g:").grid(row=2, column=0, sticky='w', pady=2)
+        self.generator_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=1)
+        self.generator_text.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=5)
 
         # Открытый ключ
-        tk.Label(key_output_frame, text="Открытый ключ (e, n):").grid(row=2, column=0, sticky='w', pady=2)
+        tk.Label(key_output_frame, text="Открытый ключ (y, g, p):").grid(row=4, column=0, sticky='w', pady=2)
         self.public_key_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=2)
-        self.public_key_text.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=5)
+        self.public_key_text.grid(row=5, column=0, columnspan=2, sticky='nsew', pady=5)
 
         # Закрытый ключ
-        tk.Label(key_output_frame, text="Закрытый ключ (d, n):").grid(row=4, column=0, sticky='w', pady=2)
-        self.private_key_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=2)
-        self.private_key_text.grid(row=5, column=0, columnspan=2, sticky='nsew', pady=5)
+        tk.Label(key_output_frame, text="Закрытый ключ (x):").grid(row=6, column=0, sticky='w', pady=2)
+        self.private_key_text = scrolledtext.ScrolledText(key_output_frame, width=80, height=1)
+        self.private_key_text.grid(row=7, column=0, columnspan=2, sticky='nsew', pady=5)
 
         key_output_frame.columnconfigure(0, weight=1)
         key_output_frame.rowconfigure(1, weight=1)
         key_output_frame.rowconfigure(3, weight=1)
         key_output_frame.rowconfigure(5, weight=1)
+        key_output_frame.rowconfigure(7, weight=1)
 
     def setup_crypto_tab(self, parent):
         """Настройка вкладки шифрования/дешифрования"""
@@ -137,45 +146,106 @@ class RSAApp:
         self.progress_bar = ttk.Progressbar(parent, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill='x', padx=10, pady=5)
 
-    def generate_primes(self):
-        """Генерация простых чисел с использованием готовых библиотек"""
+    def lehman_test(self, n, tries=10):
+        """Тест Лемана для проверки простоты числа"""
+        if n < 2:
+            return False
+        if n == 2 or n == 3:
+            return True
+        if n % 2 == 0:
+            return False
+
+        for _ in range(tries):
+            a = random.randint(2, n - 2)
+            result = pow(a, (n - 1) // 2, n)
+
+            if result != 1 and result != n - 1:
+                return False
+
+        return True
+
+    def generate_prime_candidate(self, length):
+        """Генерация кандидата в простые числа"""
+        p = secrets.randbits(length)
+        # Устанавливаем старший и младший биты в 1
+        p |= (1 << (length - 1)) | 1
+        return p
+
+    def generate_prime_number(self, length=32):
+        """Генерация простого числа с использованием теста Лемана"""
+        self.status_var.set("Генерация простого числа...")
+        self.root.update()
+
+        p = self.generate_prime_candidate(length)
+
+        # Проверяем делимость на маленькие простые числа для оптимизации
+        small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
+        for prime in small_primes:
+            if p % prime == 0:
+                p = self.generate_prime_candidate(length)
+                break
+
+        while not self.lehman_test(p, tries=20):
+            p = self.generate_prime_candidate(length)
+
+            # Снова проверяем делимость на маленькие простые числа
+            for prime in small_primes:
+                if p % prime == 0:
+                    p = self.generate_prime_candidate(length)
+                    break
+
+        return p
+
+    def generate_prime(self):
+        """Генерация простого числа с использованием теста Лемана"""
         try:
             bit_length = int(self.bit_length_var.get())
             if bit_length < 32:
                 messagebox.showwarning("Предупреждение", "Минимальная битовая длина - 32 бита")
                 return
 
-            self.status_var.set("Генерация простых чисел...")
-            self.root.update()
+            self.p_value = self.generate_prime_number(bit_length)
 
-            # Генерация двух простых чисел с помощью sympy
-            p = randprime(2 ** (bit_length - 1), 2 ** bit_length)
-            q = randprime(2 ** (bit_length - 1), 2 ** bit_length)
+            self.prime_text.delete(1.0, tk.END)
+            self.prime_text.insert(tk.END, f"p = {self.p_value}\n")
+            self.prime_text.insert(tk.END, f"Длина: {self.p_value.bit_length()} бит\n")
+            self.prime_text.insert(tk.END,
+                                   f"Проверка тестом Лемана: {'ПРОШЕЛ' if self.lehman_test(self.p_value) else 'НЕ ПРОШЕЛ'}")
 
-            # Убедимся, что p и q разные
-            while p == q:
-                q = randprime(2 ** (bit_length - 1), 2 ** bit_length)
-
-            self.primes_text.delete(1.0, tk.END)
-            self.primes_text.insert(tk.END, f"p = {p}\n")
-            self.primes_text.insert(tk.END, f"q = {q}\n")
-            self.primes_text.insert(tk.END, f"Длина p: {p.bit_length()} бит\n")
-            self.primes_text.insert(tk.END, f"Длина q: {q.bit_length()} бит\n")
-
-            self.p_value = p
-            self.q_value = q
-
-            self.status_var.set("Простые числа сгенерированы")
+            self.status_var.set("Простое число сгенерировано")
 
         except ValueError:
             messagebox.showerror("Ошибка", "Введите корректную битовую длину")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при генерации простых чисел: {str(e)}")
+            messagebox.showerror("Ошибка", f"Ошибка при генерации простого числа: {str(e)}")
+
+    def find_generator(self, p):
+        """Поиск генератора для простого числа p"""
+        factors = []
+        phi = p - 1
+        n = phi
+
+        # Факторизация phi = p-1
+        i = 2
+        while i * i <= n:
+            if n % i == 0:
+                factors.append(i)
+                while n % i == 0:
+                    n //= i
+            i += 1
+        if n > 1:
+            factors.append(n)
+
+        # Поиск генератора
+        for g in range(2, p):
+            if all(pow(g, phi // f, p) != 1 for f in factors):
+                return g
+        return None
 
     def generate_keys(self):
-        """Генерация пары ключей RSA"""
-        if not hasattr(self, 'p_value') or not hasattr(self, 'q_value'):
-            messagebox.showwarning("Предупреждение", "Сначала сгенерируйте простые числа")
+        """Генерация пары ключей Эль-Гамаля"""
+        if not hasattr(self, 'p_value'):
+            messagebox.showwarning("Предупреждение", "Сначала сгенерируйте простое число")
             return
 
         try:
@@ -183,37 +253,42 @@ class RSAApp:
             self.root.update()
 
             p = self.p_value
-            q = self.q_value
 
-            # Вычисление n и φ(n)
-            n = p * q
-            phi = (p - 1) * (q - 1)
+            # Поиск генератора
+            g = self.find_generator(p)
+            if g is None:
+                messagebox.showerror("Ошибка", "Не удалось найти генератор для данного простого числа")
+                return
 
-            # Выбор открытой экспоненты e (взаимно простой с φ(n))
-            e = 65537  # Стандартное значение
-            while math.gcd(e, phi) != 1:
-                e = random.randint(2, phi - 1)
+            # Выбор закрытого ключа x
+            x = random.randint(2, p - 2)
 
-            # Вычисление закрытой экспоненты d
-            d = mod_inverse(e, phi)
+            # Вычисление открытого ключа y
+            y = pow(g, x, p)
 
             # Сохранение ключей
-            self.public_key = (e, n)
-            self.private_key = (d, n)
-            self.n = n
+            self.public_key = (y, g, p)
+            self.private_key = x
+            self.p = p
+            self.g = g
+            self.x = x
+            self.y = y
 
             # Вывод ключей
+            self.generator_text.delete(1.0, tk.END)
+            self.generator_text.insert(tk.END, f"g = {g}")
+
             self.public_key_text.delete(1.0, tk.END)
-            self.public_key_text.insert(tk.END, f"e = {e}\n")
-            self.public_key_text.insert(tk.END, f"n = {n}")
+            self.public_key_text.insert(tk.END, f"y = {y}\n")
+            self.public_key_text.insert(tk.END, f"g = {g}\n")
+            self.public_key_text.insert(tk.END, f"p = {p}")
 
             self.private_key_text.delete(1.0, tk.END)
-            self.private_key_text.insert(tk.END, f"d = {d}\n")
-            self.private_key_text.insert(tk.END, f"n = {n}")
+            self.private_key_text.insert(tk.END, f"x = {x}")
 
             self.file_info_text.delete(1.0, tk.END)
             self.file_info_text.insert(tk.END, "Ключи успешно сгенерированы!\n")
-            self.file_info_text.insert(tk.END, f"Длина n: {n.bit_length()} бит\n")
+            self.file_info_text.insert(tk.END, f"Длина p: {p.bit_length()} бит\n")
 
             self.status_var.set("Ключи сгенерированы")
 
@@ -250,58 +325,64 @@ class RSAApp:
 
             self.status_var.set(f"Выбран файл: {os.path.basename(filename)}")
 
-    def rsa_encrypt(self, data):
-        """Шифрование данных с использованием RSA"""
+    def elgamal_encrypt(self, data):
+        """Шифрование данных с использованием Эль-Гамаля"""
         if not self.public_key:
             raise ValueError("Открытый ключ не сгенерирован")
 
-        e, n = self.public_key
+        y, g, p = self.public_key
 
         # Преобразование данных в числа и шифрование
         encrypted_blocks = []
-        block_size = (n.bit_length() - 1) // 8  # Размер блока для шифрования
 
-        for i in range(0, len(data), block_size):
-            block = data[i:i + block_size]
-            # Преобразование блока в число
-            m = int.from_bytes(block, byteorder='big', signed=False)
-            # Шифрование: c = m^e mod n
-            if m >= n:
-                # Если число слишком большое, разбиваем на меньшие блоки
-                sub_block_size = block_size // 2
-                for j in range(0, len(block), sub_block_size):
-                    sub_block = block[j:j + sub_block_size]
-                    m_sub = int.from_bytes(sub_block, byteorder='big', signed=False)
-                    c_sub = pow(m_sub, e, n)
-                    encrypted_blocks.append(c_sub.to_bytes((n.bit_length() + 7) // 8, byteorder='big'))
-                continue
+        for byte in data:
+            m = byte
 
-            c = pow(m, e, n)
-            encrypted_blocks.append(c.to_bytes((n.bit_length() + 7) // 8, byteorder='big'))
+            # Выбор случайного k, взаимно простого с p-1
+            k = random.randint(2, p - 2)
+            while math.gcd(k, p - 1) != 1:
+                k = random.randint(2, p - 2)
 
-        return b''.join(encrypted_blocks)
+            # Вычисление a = g^k mod p
+            a = pow(g, k, p)
 
-    def rsa_decrypt(self, data):
-        """Дешифрование данных с использованием RSA"""
+            # Вычисление b = y^k * m mod p
+            b = (pow(y, k, p) * m) % p
+
+            encrypted_blocks.extend([a, b])
+
+        return encrypted_blocks
+
+    def elgamal_decrypt(self, data):
+        """Дешифрование данных с использованием Эль-Гамаля"""
         if not self.private_key:
             raise ValueError("Закрытый ключ не сгенерирован")
 
-        d, n = self.private_key
-        block_size = (n.bit_length() + 7) // 8  # Размер зашифрованного блока
+        x = self.private_key
+        p = self.p
+
+        # Проверяем, что данные имеют правильную длину
+        if len(data) % 2 != 0:
+            raise ValueError("Некорректные данные для дешифрования")
 
         decrypted_blocks = []
 
-        for i in range(0, len(data), block_size):
-            block = data[i:i + block_size]
-            # Преобразование блока в число
-            c = int.from_bytes(block, byteorder='big', signed=False)
-            # Дешифрование: m = c^d mod n
-            m = pow(c, d, n)
-            # Определение размера исходного блока
-            original_size = (m.bit_length() + 7) // 8
-            decrypted_blocks.append(m.to_bytes(original_size, byteorder='big'))
+        for i in range(0, len(data), 2):
+            a = data[i]
+            b = data[i + 1]
 
-        return b''.join(decrypted_blocks)
+            # Вычисление s = a^x mod p
+            s = pow(a, x, p)
+
+            # Вычисление обратного элемента s_inv
+            s_inv = pow(s, p - 2, p)  # По малой теореме Ферма
+
+            # Вычисление m = b * s_inv mod p
+            m = (b * s_inv) % p
+
+            decrypted_blocks.append(m)
+
+        return bytes(decrypted_blocks)
 
     def encrypt_file(self):
         """Шифрование файла"""
@@ -323,19 +404,19 @@ class RSAApp:
                 file_data = f.read()
 
             # Шифрование
-            encrypted_data = self.rsa_encrypt(file_data)
-            self.processed_data = encrypted_data
+            encrypted_data = self.elgamal_encrypt(file_data)
+            self.processed_data = bytes(encrypted_data)
 
             # Показываем информацию о результате
             self.file_info_text.delete(1.0, tk.END)
             self.file_info_text.insert(tk.END, f"Файл зашифрован: {self.current_file}\n")
             self.file_info_text.insert(tk.END, f"Исходный размер: {len(file_data)} байт\n")
-            self.file_info_text.insert(tk.END, f"Зашифрованный размер: {len(encrypted_data)} байт\n")
+            self.file_info_text.insert(tk.END, f"Зашифрованный размер: {len(self.processed_data)} байт\n")
 
             # Показываем превью зашифрованных данных
-            hex_preview = encrypted_data[:100].hex()
+            hex_preview = self.processed_data[:100].hex()
             self.file_info_text.insert(tk.END, f"\nПревью (hex):\n{hex_preview}")
-            if len(encrypted_data) > 100:
+            if len(self.processed_data) > 100:
                 self.file_info_text.insert(tk.END, "\n... (данные обрезаны)")
 
             self.progress_var.set(100)
@@ -362,10 +443,10 @@ class RSAApp:
 
             # Чтение зашифрованного файла
             with open(self.current_file, 'rb') as f:
-                encrypted_data = f.read()
+                encrypted_data = list(f.read())
 
             # Дешифрование
-            decrypted_data = self.rsa_decrypt(encrypted_data)
+            decrypted_data = self.elgamal_decrypt(encrypted_data)
             self.processed_data = decrypted_data
 
             # Показываем информацию о результате
@@ -418,7 +499,7 @@ class RSAApp:
 
 def main():
     root = tk.Tk()
-    app = RSAApp(root)
+    app = ElGamalApp(root)
     root.mainloop()
 
 
