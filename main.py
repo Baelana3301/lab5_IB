@@ -4,6 +4,7 @@ import os
 import random
 import math
 import secrets
+import struct
 
 
 class ElGamalApp:
@@ -343,8 +344,6 @@ class ElGamalApp:
             raise ValueError("Открытый ключ не сгенерирован")
 
         y, g, p = self.public_key
-
-        # Преобразование данных в числа и шифрование
         encrypted_blocks = []
 
         for byte in data:
@@ -358,31 +357,24 @@ class ElGamalApp:
             # Вычисление a = g^k mod p
             a = pow(g, k, p)
 
-            # Вычисление b = y^k * m mod p
+            # Вычисление b = (y^k * m) mod p
             b = (pow(y, k, p) * m) % p
 
-            encrypted_blocks.extend([a, b])
+            # Сохраняем a и b как пару чисел (не байты!)
+            encrypted_blocks.append((a, b))
 
         return encrypted_blocks
 
-    def elgamal_decrypt(self, data):
+    def elgamal_decrypt(self, encrypted_blocks):
         """Дешифрование данных с использованием Эль-Гамаля"""
         if not self.private_key:
             raise ValueError("Закрытый ключ не сгенерирован")
 
         x = self.private_key
         p = self.p
+        decrypted_data = []
 
-        # Проверяем, что данные имеют правильную длину
-        if len(data) % 2 != 0:
-            raise ValueError("Некорректные данные для дешифрования")
-
-        decrypted_blocks = []
-
-        for i in range(0, len(data), 2):
-            a = data[i]
-            b = data[i + 1]
-
+        for a, b in encrypted_blocks:
             # Вычисление s = a^x mod p
             s = pow(a, x, p)
 
@@ -392,9 +384,60 @@ class ElGamalApp:
             # Вычисление m = b * s_inv mod p
             m = (b * s_inv) % p
 
-            decrypted_blocks.append(m)
+            decrypted_data.append(m)
 
-        return bytes(decrypted_blocks)
+        return bytes(decrypted_data)
+
+    def serialize_encrypted_data(self, encrypted_blocks):
+        """Сериализация зашифрованных данных в байты"""
+        # Формат: [количество_блоков][размер_p][a1][b1][a2][b2]...
+        result = bytearray()
+
+        # Записываем количество блоков (4 байта)
+        result.extend(struct.pack('>I', len(encrypted_blocks)))
+
+        # Записываем размер p в битах (2 байта)
+        p_bits = self.p.bit_length()
+        result.extend(struct.pack('>H', p_bits))
+
+        # Записываем каждую пару (a, b)
+        for a, b in encrypted_blocks:
+            # Вычисляем необходимое количество байт для хранения чисел
+            bytes_needed = (p_bits + 7) // 8
+            result.extend(a.to_bytes(bytes_needed, byteorder='big'))
+            result.extend(b.to_bytes(bytes_needed, byteorder='big'))
+
+        return bytes(result)
+
+    def deserialize_encrypted_data(self, data):
+        """Десериализация зашифрованных данных из байтов"""
+        try:
+            # Читаем количество блоков
+            num_blocks = struct.unpack('>I', data[:4])[0]
+            data = data[4:]
+
+            # Читаем размер p в битах
+            p_bits = struct.unpack('>H', data[:2])[0]
+            data = data[2:]
+
+            # Вычисляем размер каждого числа в байтах
+            bytes_per_number = (p_bits + 7) // 8
+
+            encrypted_blocks = []
+            for i in range(num_blocks):
+                if len(data) < 2 * bytes_per_number:
+                    raise ValueError("Недостаточно данных для десериализации")
+
+                a = int.from_bytes(data[:bytes_per_number], byteorder='big')
+                data = data[bytes_per_number:]
+                b = int.from_bytes(data[:bytes_per_number], byteorder='big')
+                data = data[bytes_per_number:]
+
+                encrypted_blocks.append((a, b))
+
+            return encrypted_blocks
+        except Exception as e:
+            raise ValueError(f"Ошибка десериализации: {str(e)}")
 
     def encrypt_file(self):
         """Шифрование файла"""
@@ -416,14 +459,17 @@ class ElGamalApp:
                 file_data = f.read()
 
             # Шифрование
-            encrypted_data = self.elgamal_encrypt(file_data)
-            self.processed_data = bytes(encrypted_data)
+            encrypted_blocks = self.elgamal_encrypt(file_data)
+
+            # Сериализация зашифрованных данных
+            self.processed_data = self.serialize_encrypted_data(encrypted_blocks)
 
             # Показываем информацию о результате
             self.file_info_text.delete(1.0, tk.END)
             self.file_info_text.insert(tk.END, f"Файл зашифрован: {self.current_file}\n")
             self.file_info_text.insert(tk.END, f"Исходный размер: {len(file_data)} байт\n")
             self.file_info_text.insert(tk.END, f"Зашифрованный размер: {len(self.processed_data)} байт\n")
+            self.file_info_text.insert(tk.END, f"Количество блоков: {len(encrypted_blocks)}\n")
 
             # Показываем превью зашифрованных данных
             hex_preview = self.processed_data[:100].hex()
@@ -455,16 +501,20 @@ class ElGamalApp:
 
             # Чтение зашифрованного файла
             with open(self.current_file, 'rb') as f:
-                encrypted_data = list(f.read())
+                encrypted_data = f.read()
+
+            # Десериализация зашифрованных данных
+            encrypted_blocks = self.deserialize_encrypted_data(encrypted_data)
 
             # Дешифрование
-            decrypted_data = self.elgamal_decrypt(encrypted_data)
+            decrypted_data = self.elgamal_decrypt(encrypted_blocks)
             self.processed_data = decrypted_data
 
             # Показываем информацию о результате
             self.file_info_text.delete(1.0, tk.END)
             self.file_info_text.insert(tk.END, f"Файл расшифрован: {self.current_file}\n")
             self.file_info_text.insert(tk.END, f"Размер данных: {len(decrypted_data)} байт\n")
+            self.file_info_text.insert(tk.END, f"Количество блоков: {len(encrypted_blocks)}\n")
 
             # Попытка показать превью для текста
             try:
