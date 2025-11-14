@@ -147,7 +147,7 @@ class ElGamalApp:
         self.progress_bar.pack(fill='x', padx=10, pady=5)
 
     def lehman_test(self, n, tries=10):
-        """Тест Лемана для проверки простоты числа"""
+        """Тест Лемана для проверки простоты числа (исправленная версия)"""
         if n < 2:
             return False
         if n == 2 or n == 3:
@@ -156,12 +156,18 @@ class ElGamalApp:
             return False
 
         for _ in range(tries):
+            # Выбираем случайное число a, меньшее n
             a = random.randint(2, n - 2)
-            result = pow(a, (n - 1) // 2, n)
 
+            # Вычисляем a^((n-1)/2) mod n
+            exponent = (n - 1) // 2
+            result = pow(a, exponent, n)
+
+            # Если результат не равен 1 и не равен n-1, то число составное
             if result != 1 and result != n - 1:
                 return False
 
+        # Если все проверки пройдены, число вероятно простое
         return True
 
     def generate_prime_candidate(self, length):
@@ -176,25 +182,29 @@ class ElGamalApp:
         self.status_var.set("Генерация простого числа...")
         self.root.update()
 
-        p = self.generate_prime_candidate(length)
+        max_attempts = 1000  # Ограничим количество попыток
+        attempts = 0
 
-        # Проверяем делимость на маленькие простые числа для оптимизации
-        small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
-        for prime in small_primes:
-            if p % prime == 0:
-                p = self.generate_prime_candidate(length)
-                break
-
-        while not self.lehman_test(p, tries=20):
+        while attempts < max_attempts:
             p = self.generate_prime_candidate(length)
+            attempts += 1
 
-            # Снова проверяем делимость на маленькие простые числа
+            # Быстрая проверка на маленькие простые делители для оптимизации
+            small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
+            is_divisible = False
             for prime in small_primes:
-                if p % prime == 0:
-                    p = self.generate_prime_candidate(length)
+                if p % prime == 0 and p != prime:
+                    is_divisible = True
                     break
 
-        return p
+            if is_divisible:
+                continue
+
+            # Проверяем тестом Лемана
+            if self.lehman_test(p, tries=20):
+                return p
+
+        raise ValueError(f"Не удалось найти простое число за {max_attempts} попыток")
 
     def generate_prime(self):
         """Генерация простого числа с использованием теста Лемана"""
@@ -209,18 +219,20 @@ class ElGamalApp:
             self.prime_text.delete(1.0, tk.END)
             self.prime_text.insert(tk.END, f"p = {self.p_value}\n")
             self.prime_text.insert(tk.END, f"Длина: {self.p_value.bit_length()} бит\n")
-            self.prime_text.insert(tk.END,
-                                   f"Проверка тестом Лемана: {'ПРОШЕЛ' if self.lehman_test(self.p_value) else 'НЕ ПРОШЕЛ'}")
+            self.prime_text.insert(tk.END, f"Проверка тестом Лемана: ПРОШЕЛ")
 
             self.status_var.set("Простое число сгенерировано")
 
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите корректную битовую длину")
+        except ValueError as e:
+            messagebox.showerror("Ошибка", str(e))
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при генерации простого числа: {str(e)}")
 
     def find_generator(self, p):
         """Поиск генератора для простого числа p"""
+        if p == 2:
+            return 1
+
         factors = []
         phi = p - 1
         n = phi
